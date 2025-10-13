@@ -26,7 +26,6 @@ contract HyperTest is Test {
     address private immutable DEFAULT_ADMIN_ROLE_KITTEN_ALGEBRA_FACTORY;
 
     address private poolAdmin = makeAddr("POOLS_ADMINISTRATOR_ROLE_ALGEBRA_FACTORY");
-    address private customPoolDeployer = makeAddr("CUSTOM_POOL_DEPLOYER_ALGEBRA_FACTORY");
     address private feeAddress = makeAddr("FEE_ADDRESS");
 
     address private plugin;
@@ -43,7 +42,7 @@ contract HyperTest is Test {
             IAlgebraFactory(KITTEN_SWAP_FACTORY).POOLS_ADMINISTRATOR_ROLE(), poolAdmin
         );
         RBAC(address(KITTEN_SWAP_FACTORY)).grantRole(
-            IAlgebraFactory(KITTEN_SWAP_FACTORY).CUSTOM_POOL_DEPLOYER(), customPoolDeployer
+            IAlgebraFactory(KITTEN_SWAP_FACTORY).CUSTOM_POOL_DEPLOYER(), address(this)
         );
         vm.stopPrank();
     }
@@ -56,24 +55,13 @@ contract HyperTest is Test {
         address token1,
         bytes calldata data
     ) external returns (address) {
-        HyperPlugin _plugin = new HyperPlugin(
-            IAlgebraPool(pool),
-            IHyperFactory(msg.sender),
-            ISwapRouter(KITTEN_SWAP_ROUTER),
-            feeAddress
-        );
+        HyperPlugin _plugin =
+            new HyperPlugin(IAlgebraPool(pool), IHyperFactory(msg.sender), ISwapRouter(KITTEN_SWAP_ROUTER), feeAddress);
         console.log("plugin deployed at: ", address(_plugin));
         return address(_plugin);
     }
 
-    function afterCreatePoolHook(
-        address pool,
-        address creator,
-        address deployer,
-        address token0,
-        address token1,
-        bytes calldata data
-    ) external {}
+    function afterCreatePoolHook(address plugin, address pool, address deployer) external {}
 
     function setUp() public {
         token0 = new MockERC20("Token0", "T0");
@@ -81,16 +69,8 @@ contract HyperTest is Test {
     }
 
     function testSetup() public {
-        vm.prank(customPoolDeployer);
-        address pool = KITTEN_SWAP_FACTORY.createCustomPool(
-            address(this),
-            address(this),
-            address(token0),
-            address(token1),
-            ""
-        );
-        console.log("pool deployed at: ", pool);
-        // vm.prank(poolAdmin);
-        // IAlgebraPool(pool).setPlugin(address(plugin));
+        address pool =
+            KITTEN_SWAP_FACTORY.createCustomPool(address(this), address(this), address(token0), address(token1), "");
+        console.log("pool deployed at: ", pool, IAlgebraPool(pool).plugin());
     }
 }
