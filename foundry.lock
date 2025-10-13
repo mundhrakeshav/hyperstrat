@@ -1,5 +1,5 @@
 {
-  "lib/Algebra.git": {
+  "lib/Algebra": {
     "tag": {
       "name": "v1.2.2-integral",
       "rev": "a5598b88f7157db5028578d15c1523d8ea2312ca"

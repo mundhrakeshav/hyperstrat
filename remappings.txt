@@ -1,0 +1,5 @@
+Algebra/=lib/Algebra/src/
+@cryptoalgebra/integral-core=lib/Algebra/src/core/
+@cryptoalgebra/integral-periphery=lib/Algebra/src/periphery/
+forge-std/=lib/forge-std/src/
+solady/=lib/solady/src/

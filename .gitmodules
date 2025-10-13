@@ -4,6 +4,6 @@
 [submodule "lib/solady"]
 	path = lib/solady
 	url = https://github.com/Vectorized/solady
-[submodule "lib/Algebra.git"]
-	path = lib/Algebra.git
-	url = https://github.com/cryptoalgebra/Algebra.git
+[submodule "lib/Algebra"]
+	path = lib/Algebra
+	url = https://github.com/cryptoalgebra/Algebra
