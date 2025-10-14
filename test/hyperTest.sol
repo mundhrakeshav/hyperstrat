@@ -59,6 +59,8 @@ contract HyperTest is Test {
     function setUp() public {
         token0 = new MockERC20("Token0", "T0");
         token1 = new MockERC20("Token1", "T1");
+        (token0, token1) = token0 < token1 ? (token0, token1) : (token1, token0);
+
         deployAndInitializePool();
         mintLiquidity();
     }
@@ -68,45 +70,30 @@ contract HyperTest is Test {
             KITTEN_SWAP_FACTORY.createCustomPool(address(this), address(this), address(token0), address(token1), "")
         );
         console.log("pool deployed at: ", address(pool), pool.plugin());
-        pool.initialize(7922816251426433759354395033600000);
+        pool.initialize(79228162514264337593543950336);
     }
 
     function mintLiquidity() public {
-        //         tickLower: parseInt(process.env.TICK_LOWER || "-887220"),
-        // tickUpper: parseInt(process.env.TICK_UPPER || "887220"),
-
         token0.mint(address(this), 1e22);
         token1.mint(address(this), 1e22);
         token0.approve(address(KITTEN_NFT_MANAGER), type(uint256).max);
         token1.approve(address(KITTEN_NFT_MANAGER), type(uint256).max);
-        
-        //     address token0;
-        // address token1;
-        // address deployer;
-        // int24 tickLower;
-        // int24 tickUpper;
-        // uint256 amount0Desired;
-        // uint256 amount1Desired;
-        // uint256 amount0Min;
-        // uint256 amount1Min;
-        // address recipient;
-        // uint256 deadline;
 
-        KITTEN_NFT_MANAGER.mint(
-            INonfungiblePositionManager.MintParams{
-                token0: address(token0),
-                token1: address(token1),
-                deployer: address(this),
-                tickLower: -887220,
-                tickUpper: 887220,
-                amount0Desired: 1e18,
-                amount1Desired: 1e18,
-                amount0Min: 0,
-                amount1Min: 0,
-                recipient: address(this),
-                deadline: block.timestamp + 15
-            }
-        );
+        INonfungiblePositionManager.MintParams memory mintParams = INonfungiblePositionManager.MintParams({
+            token0: address(token0),
+            token1: address(token1),
+            deployer: address(this),
+            tickLower: -887220,
+            tickUpper: 887220,
+            amount0Desired: 1e22,
+            amount1Desired: 1e22,
+            amount0Min: 0,
+            amount1Min: 0,
+            recipient: address(this),
+            deadline: block.timestamp + 150
+        });
+
+        KITTEN_NFT_MANAGER.mint(mintParams);
     }
 
     function testSwap() public {

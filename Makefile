@@ -27,15 +27,16 @@ test-fork:
 		echo "FORK_RPC_URL not set. Set it in .env or pass RPC_URL=..."; \
 		exit 1; \
 	fi
-	forge test --fork-url $(FORK_RPC_URL) -vvv
+	forge test --fork-url $(FORK_RPC_URL) -vvv --fork-block-number $(FORK_BLOCK_NUMBER)
 
 test-fork-verbose:
 	@if [ -z "$(FORK_RPC_URL)" ]; then \
 		echo "FORK_RPC_URL not set. Set it in .env or pass RPC_URL=..."; \
 		exit 1; \
 	fi
-	forge test --fork-url $(FORK_RPC_URL) -vvvvv
+	forge test --fork-url $(FORK_RPC_URL) -vvvvv --fork-block-number $(FORK_BLOCK_NUMBER)
 
 fork-test: test-fork
+fork-test-verbose: test-fork-verbose
 
 
