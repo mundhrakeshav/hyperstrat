@@ -12,20 +12,22 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                  CONSTANTS                                  */
     /* ═══════════════════════════════════════════════════════════════════════════ */
-
-    ISwapRouter public immutable swapRouter;
-    string private tokenName;
-    string private tokenSymbol;
-
-    address public immutable factory;
-    IERC721 public immutable collection;
     uint256 public constant MAX_SUPPLY = 1_000_000_000 * 1e18; //1b
     address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+
+    /* ═══════════════════════════════════════════════════════════════════════════ */
+    /*                                  IMMUTABLES                                  */
+    /* ═══════════════════════════════════════════════════════════════════════════ */
+    ISwapRouter public immutable swapRouter;
+    address public immutable factory;
+    IERC721 public immutable collection;
 
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                               STATE VARIABLES                               */
     /* ═══════════════════════════════════════════════════════════════════════════ */
 
+    string private tokenName;
+    string private tokenSymbol;
     uint256 public priceMultiplier = 1200; // 1.2x
     mapping(uint256 => uint256) public nftForSale; // tokenId => price in $HYPE
     uint256 public currentFees; // Accumulated trading fees, used to buy NFTs
