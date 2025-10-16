@@ -15,7 +15,7 @@ contract HyperFactory is Ownable {
 
     ISwapRouter public immutable swapRouter;
 
-    bool public routerRestrict = true; // Enable router restrictions by default
+    bool public routerRestrict;
     mapping(address => bool) public validRouter; // Approved routers for trading
     mapping(address => address) public collectionToStrategy; // Collection => Strategy
     mapping(address => address) public strategyToCollection; // Strategy => Collection

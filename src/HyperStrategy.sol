@@ -14,7 +14,7 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
     /* ═══════════════════════════════════════════════════════════════════════════ */
     uint256 public constant MAX_SUPPLY = 1_000_000_000 * 1e18; //1b
     address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
-
+    uint256 public constant E6 = 1_000_000; // Basis points denominator (hundredth of BPS)
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                  IMMUTABLES                                  */
     /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -28,7 +28,7 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
 
     string private tokenName;
     string private tokenSymbol;
-    uint256 public priceMultiplier = 1200; // 1.2x
+    uint256 public priceMultiplier;
     mapping(uint256 => uint256) public nftForSale; // tokenId => price in $HYPE
     uint256 public currentFees; // Accumulated trading fees, used to buy NFTs
 
@@ -119,7 +119,7 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
         tokenName = _tokenName;
         tokenSymbol = _tokenSymbol;
         feeCollector = _feeCollector;
-
+        priceMultiplier = 1_200_000; // Default 1.2x markup
         _mint(factory, MAX_SUPPLY);
     }
 
@@ -141,28 +141,12 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
     /*                              ADMIN FUNCTIONS                                */
     /* ═══════════════════════════════════════════════════════════════════════════ */
 
-    /// @notice Updates the name of the token
-    /// @dev Can only be called by the factory
-    /// @param _tokenName New name for the token
-    function updateName(string memory _tokenName) external {
-        if (msg.sender != factory) revert NotFactory();
-        tokenName = _tokenName;
-    }
-
-    /// @notice Updates the symbol of the token
-    /// @dev Can only be called by the factory
-    /// @param _tokenSymbol New symbol for the token
-    function updateSymbol(string memory _tokenSymbol) external {
-        if (msg.sender != factory) revert NotFactory();
-        tokenSymbol = _tokenSymbol;
-    }
-
     /// @notice Updates the price multiplier for relisting NFTs
-    /// @param _newMultiplier New multiplier in basis points (1100 = 1.1x, 10000 = 10.0x)
-    /// @dev Only callable by factory. Must be between 1.1x (1100) and 10.0x (10000)
+    /// @param _newMultiplier New multiplier in 1e6-scale (1_100_000 = 1.1x, 10_000_000 = 10.0x)
+    /// @dev Only callable by factory. Must be between 1.1x (1_100_000) and 10.0x (10_000_000)
     function setPriceMultiplier(uint256 _newMultiplier) external {
         if (msg.sender != factory) revert NotFactory();
-        if (_newMultiplier < 1100 || _newMultiplier > 10000) revert InvalidMultiplier();
+        if (_newMultiplier < 1_100_000 || _newMultiplier > 10_000_000) revert InvalidMultiplier();
         priceMultiplier = _newMultiplier;
     }
 
@@ -278,7 +262,7 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
         currentFees -= cost;
 
         // List NFT for sale at markup
-        uint256 salePrice = (cost * priceMultiplier) / 1000;
+        uint256 salePrice = (cost * priceMultiplier) / E6;
         nftForSale[expectedId] = salePrice;
 
         emit NFTBoughtByProtocol(expectedId, cost, salePrice);

@@ -7,10 +7,7 @@ contract MockERC20 is ERC20 {
     string private _name;
     string private _symbol;
 
-    constructor(
-        string memory name,
-        string memory symbol
-    ) {
+    constructor(string memory name, string memory symbol) {
         _name = name;
         _symbol = symbol;
     }
