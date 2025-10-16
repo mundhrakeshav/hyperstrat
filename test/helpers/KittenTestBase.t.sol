@@ -11,7 +11,6 @@ import {INonfungiblePositionManager} from
 import {IQuoterV2} from "@cryptoalgebra/integral-periphery/contracts/interfaces/IQuoterV2.sol";
 import {IAlgebraPlugin} from "@cryptoalgebra/integral-core/contracts/interfaces/plugin/IAlgebraPlugin.sol";
 import {HyperPlugin} from "src/HyperPlugin.sol";
-import {IHyperFactory} from "src/HyperInterfaces.sol";
 import {IHyperStrategy} from "src/HyperInterfaces.sol";
 import {HyperStrategy} from "src/HyperStrategy.sol";
 import {MockERC20} from "test/mocks/MockERC20.sol";
@@ -68,7 +67,7 @@ abstract contract KittenTestBase is Test {
         token0.mint(address(this), 1e9 * 1e18);
 
         hyperStrategy = address(
-            new HyperStrategy("Hypurr", "HYPE", address(this), KITTEN_SWAP_ROUTER, HYPER_COLLECTION, feeAddress)
+            new HyperStrategy("Hypurr", "HYPE", address(this), KITTEN_SWAP_ROUTER, HYPER_COLLECTION)
         );
         token1 = MockERC20(address(hyperStrategy));
 
@@ -146,7 +145,6 @@ abstract contract KittenTestBase is Test {
     ) external virtual returns (address) {
         HyperPlugin _plugin = new HyperPlugin(
             IAlgebraPool(poolAddress),
-            IHyperFactory(address(this)),
             ISwapRouter(KITTEN_SWAP_ROUTER),
             IHyperStrategy(hyperStrategy),
             feeAddress

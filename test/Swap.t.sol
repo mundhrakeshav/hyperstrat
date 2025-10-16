@@ -47,6 +47,11 @@ contract SwapTest is KittenTestBase {
         uint256 amountOut = swapExact(tokenIn, tokenOut, 1e18, 0);
         console.log("swapped 1e18 ", tokenIn);
         console.log("for ", amountOut, tokenOut);
+
+        uint256 balanceToken0 = token0.balanceOf(pool.plugin());
+        uint256 balanceToken1 = token1.balanceOf(pool.plugin());
+        console.log("balanceToken0: ", balanceToken0);
+        console.log("balanceToken1: ", balanceToken1);
     }
 
     function beforeCreatePoolHook(address pool_, address, address, address, address, bytes calldata)

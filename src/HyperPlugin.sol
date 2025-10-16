@@ -3,14 +3,15 @@ pragma solidity ^0.8.20;
 
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
-import "./HyperInterfaces.sol";
 import {ISwapRouter} from "@cryptoalgebra/integral-periphery/contracts/interfaces/ISwapRouter.sol";
 import {Plugins} from "@cryptoalgebra/integral-core/contracts/libraries/Plugins.sol";
 import {IAlgebraPool} from "@cryptoalgebra/integral-core/contracts/interfaces/IAlgebraPool.sol";
 import {IAlgebraPlugin} from "@cryptoalgebra/integral-core/contracts/interfaces/plugin/IAlgebraPlugin.sol";
 
 import {console} from "forge-std/console.sol";
+import {IHyperStrategy} from "src/interfaces/IHyperStrategy.sol";
 /// @title Hyper Strategy Plugin Hooks - https://hyperstr.xyz
+
 contract HyperPlugin is IAlgebraPlugin, ReentrancyGuard {
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                               CONSTANTS                                     */
@@ -19,18 +20,18 @@ contract HyperPlugin is IAlgebraPlugin, ReentrancyGuard {
     uint256 private constant TOTAL_BIPS = 1_000_000;
     uint256 private constant DEFAULT_FEE = 100_000; // 10%
     uint256 private constant STARTING_BUY_FEE = 990_000; // 99%
-    uint8 private constant DEFAULT_PLUGIN_CONFIG = uint8(Plugins.BEFORE_SWAP_FLAG | Plugins.AFTER_SWAP_FLAG | Plugins.AFTER_INIT_FLAG | Plugins.DYNAMIC_FEE);
+    uint8 private constant DEFAULT_PLUGIN_CONFIG =
+        uint8(Plugins.BEFORE_SWAP_FLAG | Plugins.AFTER_SWAP_FLAG | Plugins.AFTER_INIT_FLAG | Plugins.DYNAMIC_FEE);
 
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                               STATE VARIABLES                               */
     /* ═══════════════════════════════════════════════════════════════════════════ */
 
-    IHyperFactory public immutable factory; // Factory managing HyperStrategy contracts and controls
     IAlgebraPool public immutable pool; // The pool this plugin is attached to
     ISwapRouter public immutable swapRouter; // Swap router for token conversions
     IHyperStrategy public immutable hyperStrategy; // HyperStrategy contract
-
     address public feeAddress; // Address receiving fees
+
     uint256 public initTimestamp;
     bool public strategyIsToken0;
 
@@ -56,18 +57,15 @@ contract HyperPlugin is IAlgebraPlugin, ReentrancyGuard {
 
     /// @notice Constructor initializes the plugin with required dependencies
     /// @param _pool The GLiquid pool this plugin is attached to
-    /// @param _factory The HyperFactory contract
-    /// @param _swapRouter The GLiquid swap router
+    /// @param _swapRouter The Algebra swap router
     /// @param _feeAddress Address to send protocol fees (20%)
     constructor(
         IAlgebraPool _pool,
-        IHyperFactory _factory,
         ISwapRouter _swapRouter,
         IHyperStrategy _hyperStrategy,
         address _feeAddress
     ) {
         pool = _pool;
-        factory = _factory;
         swapRouter = _swapRouter;
         hyperStrategy = _hyperStrategy;
         feeAddress = _feeAddress;
@@ -76,15 +74,6 @@ contract HyperPlugin is IAlgebraPlugin, ReentrancyGuard {
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                               ADMIN FUNCTIONS                               */
     /* ═══════════════════════════════════════════════════════════════════════════ */
-
-    /// @notice Updates the fee address for receiving protocol fees
-    /// @param _feeAddress New address to receive fees
-    function updateFeeAddress(address _feeAddress) external {
-        if (msg.sender != factory.owner()) {
-            revert NotHyperStrategyFactoryOwner();
-        }
-        feeAddress = _feeAddress;
-    }
 
     /// @notice Handle plugin fee transfer from Algebra pool
     /// @param pluginFee0 Fee0 amount transferred to plugin
@@ -165,8 +154,8 @@ contract HyperPlugin is IAlgebraPlugin, ReentrancyGuard {
     }
 
     function beforeSwap(
-        address, /*sender*/
-        address, /*recipient*/
+        address, /* sender */
+        address recipient,
         bool zeroToOne, /*zeroToOne*/
         int256, /*amountRequired*/
         uint160, /*limitSqrtPrice*/
@@ -174,10 +163,7 @@ contract HyperPlugin is IAlgebraPlugin, ReentrancyGuard {
         bytes calldata /*data*/
     ) external override returns (bytes4 selector, uint24 feeOverride, uint24 pluginFee) {
         if (msg.sender != address(pool)) revert PoolMismatch();
-        // Mark mid-swap to restrict router if needed
-        if (factory.routerRestrict()) {
-            hyperStrategy.setMidSwap(false);
-        }
+        if (recipient == address(hyperStrategy)) return (this.beforeSwap.selector, 0, 0);
 
         // Dynamic fee logic:
         // - "Buy" direction starts at 99% and linearly decays to 10% over 1 hour

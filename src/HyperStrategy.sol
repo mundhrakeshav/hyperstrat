@@ -4,22 +4,23 @@ pragma solidity ^0.8.20;
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
-import "./HyperInterfaces.sol";
+import {Ownable} from "solady/auth/Ownable.sol";
 import {ISwapRouter} from "@cryptoalgebra/integral-periphery/contracts/interfaces/ISwapRouter.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IWHYPE} from "src/interfaces/IWHYPE.sol";
 
-/// @title Hyyper Strategy - https://hyperstr.xyz
-contract HyperStrategy is ERC20, ReentrancyGuard {
+contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                  CONSTANTS                                  */
     /* ═══════════════════════════════════════════════════════════════════════════ */
     uint256 public constant MAX_SUPPLY = 1_000_000_000 * 1e18; //1b
-    address public constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
     uint256 public constant E6 = 1_000_000; // Basis points denominator (hundredth of BPS)
+    address public constant DEAD_ADDRESS = address(0xdEaD);
+    address public constant WHYPE = address(0x5555555555555555555555555555555555555555);
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                  IMMUTABLES                                  */
     /* ═══════════════════════════════════════════════════════════════════════════ */
     ISwapRouter public immutable swapRouter;
-    address public immutable factory;
     IERC721 public immutable collection;
 
     /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -29,19 +30,13 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
     string private tokenName;
     string private tokenSymbol;
     uint256 public priceMultiplier;
-    mapping(uint256 => uint256) public nftForSale; // tokenId => price in $HYPE
-    uint256 public currentFees; // Accumulated trading fees, used to buy NFTs
+    uint256 public currentFees;
 
-    uint256 public hypeToTwap; // HYPE from NFT sales waiting to be converted to buyback
-    // hypeToTwap (NFT Selling) to be burned
-    uint256 public twapIncrement = 50 ether; // Amount to burn per TWAP execution
-    uint256 public twapDelayInBlocks = 30; // Blocks between TWAP executions
-    uint256 public lastTwapBlock; // Last block TWAP was executed
 
-    // @audit should this be transient?
-    bool public midSwap; // Flag to allow transfers during swaps
-    address public feeCollector; // Address authorized to deposit fees
-    mapping(address => bool) public whitelistedMarketplaces; // Authorized NFT marketplaces
+    mapping(address => bool) public whitelistedMarketplaces;
+    mapping(address => mapping(bytes4 => bool)) public whitelistedSelectors;
+    mapping(address => bool) public whitelistedTransferAddresses;
+
 
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                CUSTOM EVENTS                                */
@@ -49,34 +44,32 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
 
     event NFTBoughtByProtocol(uint256 indexed tokenId, uint256 purchasePrice, uint256 listPrice);
     event NFTSoldByProtocol(uint256 indexed tokenId, uint256 price, address buyer);
-    event FeesAdded(uint256 amount, address indexed sender);
-    event TokensBurned(uint256 hypeAmount, uint256 tokensReceived);
-    event TwapParametersUpdated(uint256 increment, uint256 delay);
+    event FeesAdded(uint256 amt, address indexed sender);
+    event TokensBurned(uint256 amt, uint256 tokensReceived);
     event MarketplaceWhitelisted(address indexed marketplace, bool status);
-
+    event PriceMultiplierUpdated(uint256 newPriceMultiplier);
+    event SelectorWhitelisted(address indexed marketplace, bytes4 indexed selector, bool status);
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                CUSTOM ERRORS                                */
     /* ═══════════════════════════════════════════════════════════════════════════ */
 
-    error NFTNotForSale();
-    error NFTPriceTooLow();
-    error InvalidMultiplier();
-    error NoHYPEToTwap();
-    error TwapDelayNotMet();
-    error NotEnoughHype();
-    error NotFactory();
-    error AlreadyNFTOwner();
-    error NeedToBuyNFT();
-    error NotNFTOwner();
-    error NotFeeCollector();
-    error ExternalCallFailed(bytes reason);
-    error NotValidRouter();
-    error InvalidAddress();
-    error InvalidFactory();
     error InvalidSwapRouter();
     error InvalidCollection();
     error InvalidFeeCollector();
+    error InvalidAddress();
+    error InvalidMultiplier();
+    error PluginAlreadySet();
+    error NotPlugin();
+    error NotFactory();
+    error NotFeeCollector();
+    error NotEnoughValue();
+    error AlreadyNFTOwner();
+    error NeedToBuyNFT();
+    error NotNFTOwner();
+    error NotWhitelistedSelector();
     error MarketplaceNotWhitelisted();
+    error ExternalCallFailed(bytes reason);
+    error InvalidTransfer();
 
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                 CONSTRUCTOR                                 */
@@ -85,22 +78,16 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
     /// @notice Initializes the HyperStrategy contract
     /// @param _tokenName Name of the strategy token
     /// @param _tokenSymbol Symbol of the strategy token
-    /// @param _factory Address of the HyperFactory contract
+    /// @param _owner Address of the owner
     /// @param _swapRouter Address of the GLiquid SwapRouter contract
     /// @param _collection Address of the NFT collection contract
-    /// @param _feeCollector Address authorized to deposit trading fees
     constructor(
         string memory _tokenName,
         string memory _tokenSymbol,
-        address _factory,
+        address _owner,
         ISwapRouter _swapRouter,
-        address _collection,
-        address _feeCollector
+        address _collection
     ) {
-        if (_factory == address(0)) {
-            revert InvalidFactory();
-        }
-
         if (address(_swapRouter) == address(0)) {
             revert InvalidSwapRouter();
         }
@@ -109,18 +96,17 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
             revert InvalidCollection();
         }
 
-        if (_feeCollector == address(0)) {
-            revert InvalidFeeCollector();
-        }
-
-        factory = _factory;
+        _initializeOwner(_owner);
         swapRouter = _swapRouter;
         collection = IERC721(_collection);
         tokenName = _tokenName;
         tokenSymbol = _tokenSymbol;
-        feeCollector = _feeCollector;
         priceMultiplier = 1_200_000; // Default 1.2x markup
-        _mint(factory, MAX_SUPPLY);
+        _mint(_owner, MAX_SUPPLY);
+    }
+
+    function _guardInitializeOwner() internal pure override returns (bool guard) {
+        return true;
     }
 
     /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -142,40 +128,19 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
     /* ═══════════════════════════════════════════════════════════════════════════ */
 
     /// @notice Updates the price multiplier for relisting NFTs
-    /// @param _newMultiplier New multiplier in 1e6-scale (1_100_000 = 1.1x, 10_000_000 = 10.0x)
-    /// @dev Only callable by factory. Must be between 1.1x (1_100_000) and 10.0x (10_000_000)
-    function setPriceMultiplier(uint256 _newMultiplier) external {
-        if (msg.sender != factory) revert NotFactory();
-        if (_newMultiplier < 1_100_000 || _newMultiplier > 10_000_000) revert InvalidMultiplier();
+    /// @param _newMultiplier New multiplier in 1e6-scale
+    /// @dev Only callable by owner
+    function setPriceMultiplier(uint256 _newMultiplier) external onlyOwner {
         priceMultiplier = _newMultiplier;
+        emit PriceMultiplierUpdated(_newMultiplier);
     }
 
-    /// @notice Updates the TWAP parameters
-    /// @param _newIncrement Amount of HYPE to burn per TWAP execution
-    /// @param _newDelay Blocks between TWAP executions
-    /// @dev Only callable by factory
-    function setTwapParameters(uint256 _newIncrement, uint256 _newDelay) external {
-        if (msg.sender != factory) revert NotFactory();
-        twapIncrement = _newIncrement;
-        twapDelayInBlocks = _newDelay;
-        emit TwapParametersUpdated(_newIncrement, _newDelay);
-    }
-
-    /// @notice Updates the fee collector address
-    /// @param _newCollector New fee collector address
-    /// @dev Only callable by factory
-    function setFeeCollector(address _newCollector) external {
-        if (msg.sender != factory) revert NotFactory();
-        if (_newCollector == address(0)) revert InvalidAddress();
-        feeCollector = _newCollector;
-    }
 
     /// @notice Adds or removes a marketplace from the whitelist
     /// @param _marketplace Address of the marketplace contract
     /// @param _status True to whitelist, false to remove
-    /// @dev Only callable by factory
-    function setMarketplaceWhitelist(address _marketplace, bool _status) external {
-        if (msg.sender != factory) revert NotFactory();
+    /// @dev Only callable by owner
+    function setMarketplaceWhitelist(address _marketplace, bool _status) external onlyOwner {
         if (_marketplace == address(0)) revert InvalidAddress();
         whitelistedMarketplaces[_marketplace] = _status;
         emit MarketplaceWhitelisted(_marketplace, _status);
@@ -187,143 +152,162 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
     /*                            MECHANISM FUNCTIONS                              */
     /* ═══════════════════════════════════════════════════════════════════════════ */
 
-    /// @notice Allows authorized fee collector to deposit trading fees
-    /// @dev Only callable by the fee collector contract/address
-    function addFees() external payable nonReentrant {
-        if (msg.sender != feeCollector && msg.sender != factory) revert NotFeeCollector();
+    /// @notice Deposits trading fees
+    function addFees() external payable {
         currentFees += msg.value;
         emit FeesAdded(msg.value, msg.sender);
     }
 
-    /// @notice Sets midSwap flag to allow transfers during swaps
-    /// @dev Only callable by fee collector or factory
-    function setMidSwap(bool value) external {
-        if (msg.sender != feeCollector && msg.sender != factory) revert NotFeeCollector();
-        midSwap = value;
+    function setSelectorWhitelist(address _marketplace, bytes4 _selector, bool _status) external onlyOwner {
+        if (_marketplace == address(0) || _selector == bytes4(0)) revert InvalidAddress();
+        whitelistedSelectors[_marketplace][_selector] = _status;
+        emit SelectorWhitelisted(_marketplace, _selector, _status);
     }
 
-    // @audit review this
-    /// @notice Buys a specific NFT from external marketplace and lists it for sale
-    /// @param value Amount of HYPE to spend on the NFT purchase
-    /// @param data Calldata to execute the purchase
+
+    /* TODO:
+        - Needs approval flow
+        - Needs to be able to sell NFTs
+    */
+    /// @notice Buys a specific NFT from an external marketplace and lists it for sale
+    /// @param marketplace marketplace contract address
+    /// @param value Amount of HYPE (native) to send with the purchase call
+    /// @param data Calldata to execute the purchase on the marketplace
     /// @param expectedId Token ID expected to be purchased
-    /// @param target Target contract address (marketplace)
-    /// @dev Only callable by fee collector or factory
-    function buyTargetNFT(uint256 value, bytes calldata data, uint256 expectedId, address target)
+    /// @dev Anyone may call this function. The contract will only execute calls to
+    ///      marketplaces and function selectors that are present in the contract-controlled
+    ///      whitelists (see `whitelistedMarketplaces` and `whitelistedSelectors`). These
+    ///      whitelists are controlled by the factory/owner. The function uses the
+    ///      contract's native balance minus `currentFees` to pay for purchases.
+
+    function buyNFT(address marketplace, uint256 value, bytes calldata data, uint256 expectedId)
         external
         nonReentrant
     {
-        // Only fee collector or factory can call this
-        if (msg.sender != feeCollector && msg.sender != factory) {
-            revert NotFeeCollector();
-        }
-
         // Verify marketplace is whitelisted
-        if (!whitelistedMarketplaces[target]) {
+        if (!whitelistedMarketplaces[marketplace]) {
             revert MarketplaceNotWhitelisted();
         }
 
-        // Store balances before external call
-        uint256 hypeBalanceBefore = address(this).balance;
+        // Ensure calldata has at least 4 bytes before taking the selector slice
+        if (data.length < 4 || !whitelistedSelectors[marketplace][bytes4(data[:4])]) {
+            revert NotWhitelistedSelector();
+        }
+
+        // Check ownership, but don't revert if token doesn't exist (ownerOf may revert)
+        try collection.ownerOf(expectedId) returns (address owner) {
+            if (owner == address(this)) {
+                revert AlreadyNFTOwner();
+            }
+        } catch {
+            // If ownerOf reverts (non-existent token), proceed — caller expects to buy it
+        }
+
+        uint256 totalBalanceBefore = address(this).balance;
         uint256 nftBalanceBefore = collection.balanceOf(address(this));
 
-        // Verify we don't already own the NFT
-        if (collection.ownerOf(expectedId) == address(this)) {
-            revert AlreadyNFTOwner();
+        // Ensure reserved fees aren't larger than the available balance
+        if (totalBalanceBefore < currentFees) {
+            revert NotEnoughValue();
         }
 
-        // Ensure we have enough fees to cover the purchase
-        if (value > currentFees) {
-            revert NotEnoughHype();
+        uint256 balanceToSpend = totalBalanceBefore - currentFees;
+
+        if (value > balanceToSpend) {
+            revert NotEnoughValue();
         }
 
-        // Execute purchase on external marketplace
-        (bool success, bytes memory reason) = target.call{value: value}(data);
+        (bool success, bytes memory returnData) = marketplace.call{value: value}(data);
         if (!success) {
-            revert ExternalCallFailed(reason);
+            revert ExternalCallFailed(returnData);
         }
 
-        // Verify we received exactly one more NFT
         uint256 nftBalanceAfter = collection.balanceOf(address(this));
         if (nftBalanceAfter != nftBalanceBefore + 1) {
             revert NeedToBuyNFT();
         }
 
-        // Verify we now own the expected NFT
         if (collection.ownerOf(expectedId) != address(this)) {
             revert NotNFTOwner();
         }
 
-        // Calculate actual cost and update fees
-        uint256 cost = hypeBalanceBefore - address(this).balance;
-        if (cost > currentFees) {
-            revert NotEnoughHype();
+        // Compute cost safely: if the contract balance increased (e.g. refunds/bonuses),
+        // avoid underflow by setting cost to 0 in that case.
+        uint256 totalBalanceAfter = address(this).balance;
+        uint256 cost;
+        if (totalBalanceAfter <= totalBalanceBefore) {
+            uint256 diff = totalBalanceBefore - totalBalanceAfter;
+            // Clamp cost to at most the `value` sent for the purchase call
+            cost = diff > value ? value : diff;
+        } else {
+            // Received more ETH than before the call; treat purchase cost as 0
+            cost = 0;
         }
-        currentFees -= cost;
 
         // List NFT for sale at markup
         uint256 salePrice = (cost * priceMultiplier) / E6;
-        nftForSale[expectedId] = salePrice;
 
+        // List NFT for sale at markup
+        // nftForSale[expectedId] = salePrice;
         emit NFTBoughtByProtocol(expectedId, cost, salePrice);
     }
 
-    /// @notice Sells an NFT owned by the contract for the listed price
-    /// @param tokenId The ID of the NFT to sell
-    function sellTargetNFT(uint256 tokenId) external payable nonReentrant {
-        // Get sale price
-        uint256 salePrice = nftForSale[tokenId];
+    // /// @notice Sells an NFT owned by the contract for the listed price
+    // /// @param tokenId The ID of the NFT to sell
+    // function sellTargetNFT(uint256 tokenId) external payable nonReentrant {
+    //     // Get sale price
+    //     uint256 salePrice = nftForSale[tokenId];
 
-        // Verify NFT is for sale
-        if (salePrice == 0) revert NFTNotForSale();
+    //     // Verify NFT is for sale
+    //     if (salePrice == 0) revert NFTNotForSale();
 
-        // Verify sent HYPE matches sale price
-        if (msg.value != salePrice) revert NFTPriceTooLow();
+    //     // Verify sent HYPE matches sale price
+    //     if (msg.value != salePrice) revert NFTPriceTooLow();
 
-        // Verify contract owns the NFT
-        if (collection.ownerOf(tokenId) != address(this)) revert NotNFTOwner();
+    //     // Verify contract owns the NFT
+    //     if (collection.ownerOf(tokenId) != address(this)) revert NotNFTOwner();
 
-        // Transfer NFT to buyer
-        collection.transferFrom(address(this), msg.sender, tokenId);
+    //     // Transfer NFT to buyer
+    //     collection.transferFrom(address(this), msg.sender, tokenId);
 
-        // Remove NFT from sale
-        delete nftForSale[tokenId];
+    //     // Remove NFT from sale
+    //     delete nftForSale[tokenId];
 
-        // Add sale proceeds to TWAP queue
-        hypeToTwap += salePrice;
+    //     // Add sale proceeds to TWAP queue
+    //     hypeToTwap += salePrice;
 
-        emit NFTSoldByProtocol(tokenId, salePrice, msg.sender);
-    }
+    //     emit NFTSoldByProtocol(tokenId, salePrice, msg.sender);
+    // }
 
-    /// @notice Processes accumulated HYPE to buy and burn tokens via TWAP
-    /// @dev Can be called by anyone once delay period has passed
-    /// @dev Caller receives 0.5% reward for executing the transaction
-    function processTokenTwap() external nonReentrant {
-        if (hypeToTwap == 0) revert NoHYPEToTwap();
+    // /// @notice Processes accumulated HYPE to buy and burn tokens
+    // /// @dev Can be called by anyone once delay period has passed
+    // /// @dev Caller receives 0.5% reward for executing the transaction
+    // function buyAndBurnTokens() external nonReentrant {
+    //     if (hypeToTwap == 0) revert NoHYPEToTwap();
 
-        // Check if enough blocks have passed since last TWAP
-        if (block.number < lastTwapBlock + twapDelayInBlocks) revert TwapDelayNotMet();
+    //     // Check if enough blocks have passed since last TWAP
+    //     if (block.number < lastTwapBlock + twapDelayInBlocks) revert TwapDelayNotMet();
 
-        // Calculate amount to burn - either twapIncrement or remaining hypeToTwap
-        uint256 burnAmount = twapIncrement;
-        if (hypeToTwap < twapIncrement) {
-            burnAmount = hypeToTwap;
-        }
+    //     // Calculate amount to burn - either twapIncrement or remaining hypeToTwap
+    //     uint256 burnAmount = twapIncrement;
+    //     if (hypeToTwap < twapIncrement) {
+    //         burnAmount = hypeToTwap;
+    //     }
 
-        // Calculate 0.5% reward for caller
-        uint256 reward = (burnAmount * 5) / 1000;
-        burnAmount -= reward;
+    //     // Calculate 0.5% reward for caller
+    //     uint256 reward = (burnAmount * 5) / 1000;
+    //     burnAmount -= reward;
 
-        // Update state
-        hypeToTwap -= (burnAmount + reward);
-        lastTwapBlock = block.number;
+    //     // Update state
+    //     hypeToTwap -= (burnAmount + reward);
+    //     lastTwapBlock = block.number;
 
-        // Execute buy and burn
-        _buyAndBurnTokens(burnAmount);
+    //     // Execute buy and burn
+    //     _buyAndBurnTokens(burnAmount);
 
-        // Send reward to caller
-        SafeTransferLib.forceSafeTransferETH(msg.sender, reward);
-    }
+    //     // Send reward to caller
+    //     SafeTransferLib.forceSafeTransferETH(msg.sender, reward);
+    // }
 
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                             INTERNAL FUNCTIONS                              */
@@ -332,27 +316,19 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
     /// @notice Buys tokens with native $HYPE via GLiquid and burns them
     /// @param amountIn The amount of $HYPE to spend on tokens
     function _buyAndBurnTokens(uint256 amountIn) internal {
-        // Set midSwap to allow the transfer
-        midSwap = true;
-
-        // Prepare swap parameters - using native $HYPE
-        // Note: For native token, we use address(0) as tokenIn
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
-            tokenIn: address(0), // Native $HYPE token
-            deployer: address(0), // Standard pool, not custom
+            tokenIn: WHYPE,
+            deployer: address(0),
             tokenOut: address(this),
-            recipient: DEAD_ADDRESS, // Send directly to burn address
+            recipient: DEAD_ADDRESS,
             deadline: block.timestamp,
             amountIn: amountIn,
-            amountOutMinimum: 0, // No slippage protection for burns
-            limitSqrtPrice: 0 // No price limit
+            amountOutMinimum: 0,
+            limitSqrtPrice: 0
         });
 
         // Execute swap with native token - tokens go directly to DEAD_ADDRESS
         uint256 amountOut = swapRouter.exactInputSingle{value: amountIn}(params);
-
-        // Reset midSwap
-        midSwap = false;
 
         emit TokensBurned(amountIn, amountOut);
     }
@@ -363,13 +339,11 @@ contract HyperStrategy is ERC20, ReentrancyGuard {
     /// @param to The address receiving tokens
     /// @dev Reverts if transfer isn't through approved router
     function _afterTokenTransfer(address from, address to, uint256) internal view override {
-        // Allow transfer if router restrictions are disabled or we're mid-swap
-        if (!IHyperFactory(factory).routerRestrict() || midSwap) return;
-
-        // Check if transfer is valid based on factory rules
-        if (!IHyperFactory(factory).validTransfer(from, to, address(this))) {
-            revert NotValidRouter();
+        if (whitelistedTransferAddresses[from] || whitelistedTransferAddresses[to]) {
+            return;
         }
+        
+        revert InvalidTransfer();
     }
 
     /// @notice ERC721 receiver function to accept NFT transfers
