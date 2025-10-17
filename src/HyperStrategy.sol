@@ -32,11 +32,9 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     uint256 public priceMultiplier;
     uint256 public currentFees;
 
-
     mapping(address => bool) public whitelistedMarketplaces;
     mapping(address => mapping(bytes4 => bool)) public whitelistedSelectors;
     mapping(address => bool) public whitelistedTransferAddresses;
-
 
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                CUSTOM EVENTS                                */
@@ -49,6 +47,7 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     event MarketplaceWhitelisted(address indexed marketplace, bool status);
     event PriceMultiplierUpdated(uint256 newPriceMultiplier);
     event SelectorWhitelisted(address indexed marketplace, bytes4 indexed selector, bool status);
+    event TransferAddressWhitelisted(address indexed transferAddress, bool status);
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                CUSTOM ERRORS                                */
     /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -135,7 +134,6 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
         emit PriceMultiplierUpdated(_newMultiplier);
     }
 
-
     /// @notice Adds or removes a marketplace from the whitelist
     /// @param _marketplace Address of the marketplace contract
     /// @param _status True to whitelist, false to remove
@@ -152,18 +150,21 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     /*                            MECHANISM FUNCTIONS                              */
     /* ═══════════════════════════════════════════════════════════════════════════ */
 
-    /// @notice Deposits trading fees
-    function addFees() external payable {
-        currentFees += msg.value;
-        emit FeesAdded(msg.value, msg.sender);
-    }
-
     function setSelectorWhitelist(address _marketplace, bytes4 _selector, bool _status) external onlyOwner {
         if (_marketplace == address(0) || _selector == bytes4(0)) revert InvalidAddress();
         whitelistedSelectors[_marketplace][_selector] = _status;
         emit SelectorWhitelisted(_marketplace, _selector, _status);
     }
 
+    /// @notice Adds or removes a transfer address from the whitelist
+    /// @param _transferAddress Address to whitelist for transfers
+    /// @param _status True to whitelist, false to remove
+    /// @dev Only callable by owner
+    function setTransferAddressWhitelist(address _transferAddress, bool _status) external onlyOwner {
+        if (_transferAddress == address(0)) revert InvalidAddress();
+        whitelistedTransferAddresses[_transferAddress] = _status;
+        emit TransferAddressWhitelisted(_transferAddress, _status);
+    }
 
     /* TODO:
         - Needs approval flow
@@ -339,10 +340,16 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     /// @param to The address receiving tokens
     /// @dev Reverts if transfer isn't through approved router
     function _afterTokenTransfer(address from, address to, uint256) internal view override {
+        // Allow minting (from = address(0))
+        if (from == address(0)) return;
+
+        // Allow burning (to = DEAD_ADDRESS or address(0))
+        if (to == DEAD_ADDRESS || to == address(0)) return;
+
         if (whitelistedTransferAddresses[from] || whitelistedTransferAddresses[to]) {
             return;
         }
-        
+
         revert InvalidTransfer();
     }
 

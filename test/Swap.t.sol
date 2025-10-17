@@ -3,8 +3,7 @@ pragma solidity ^0.8.4;
 
 import {ISwapRouter} from "@cryptoalgebra/integral-periphery/contracts/interfaces/ISwapRouter.sol";
 import {HyperPlugin} from "src/HyperPlugin.sol";
-import {IHyperFactory} from "src/HyperInterfaces.sol";
-import {IHyperStrategy} from "src/HyperInterfaces.sol";
+import {IHyperStrategy} from "src/interfaces/IHyperStrategy.sol";
 import {IAlgebraPool} from "@cryptoalgebra/integral-core/contracts/interfaces/IAlgebraPool.sol";
 import {KittenTestBase} from "test/helpers/KittenTestBase.t.sol";
 import {IQuoterV2} from "@cryptoalgebra/integral-periphery/contracts/interfaces/IQuoterV2.sol";
@@ -61,10 +60,9 @@ contract SwapTest is KittenTestBase {
     {
         HyperPlugin _plugin = new HyperPlugin(
             IAlgebraPool(pool_),
-            IHyperFactory(address(this)),
             ISwapRouter(KITTEN_SWAP_ROUTER),
             IHyperStrategy(hyperStrategy),
-            feeAddress
+            address(this)
         );
         console.log("plugin deployed at: ", address(_plugin));
         return address(_plugin);

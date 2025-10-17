@@ -11,7 +11,7 @@ import {INonfungiblePositionManager} from
 import {IQuoterV2} from "@cryptoalgebra/integral-periphery/contracts/interfaces/IQuoterV2.sol";
 import {IAlgebraPlugin} from "@cryptoalgebra/integral-core/contracts/interfaces/plugin/IAlgebraPlugin.sol";
 import {HyperPlugin} from "src/HyperPlugin.sol";
-import {IHyperStrategy} from "src/HyperInterfaces.sol";
+import {IHyperStrategy} from "src/interfaces/IHyperStrategy.sol";
 import {HyperStrategy} from "src/HyperStrategy.sol";
 import {MockERC20} from "test/mocks/MockERC20.sol";
 

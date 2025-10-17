@@ -82,6 +82,9 @@ interface IHyperStrategy {
     /// @param selector Function selector to check
     function whitelistedSelectors(address marketplace, bytes4 selector) external view returns (bool);
 
+    /// @notice Returns the owner of the contract
+    function owner() external view returns (address);
+
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                              ADMIN FUNCTIONS                                */
     /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -104,10 +107,6 @@ interface IHyperStrategy {
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                            MECHANISM FUNCTIONS                              */
     /* ═══════════════════════════════════════════════════════════════════════════ */
-
-    /// @notice Deposits trading fees
-    function addFees() external payable;
-
     /// @notice Buys a specific NFT from an external marketplace
     /// @param marketplace Marketplace contract address
     /// @param value Amount of HYPE (native) to send with the purchase call
