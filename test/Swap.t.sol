@@ -8,7 +8,7 @@ import {IAlgebraPool} from "@cryptoalgebra/integral-core/contracts/interfaces/IA
 import {KittenTestBase} from "test/helpers/KittenTestBase.t.sol";
 import {IQuoterV2} from "@cryptoalgebra/integral-periphery/contracts/interfaces/IQuoterV2.sol";
 import {console} from "forge-std/console.sol";
-
+import {ERC20} from "solady/tokens/ERC20.sol";
 contract SwapTest is KittenTestBase {
     bool private _routerRestrict;
 
@@ -30,7 +30,7 @@ contract SwapTest is KittenTestBase {
             IQuoterV2.QuoteExactInputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
-                deployer: address(this),
+                deployer: ZERO_ADDRESS,
                 amountIn: 1e18,
                 limitSqrtPrice: 0
             })
@@ -44,28 +44,13 @@ contract SwapTest is KittenTestBase {
         console.log("fee:                       ", fee);
 
         uint256 amountOut = swapExact(tokenIn, tokenOut, 1e18, 0);
-        console.log("swapped 1e18 ", tokenIn);
-        console.log("for ", amountOut, tokenOut);
+        console.log("swapped 1e18 ", ERC20(tokenIn).name());
+        console.log("for ", amountOut, ERC20(tokenOut).name());
 
         uint256 balanceToken0 = token0.balanceOf(pool.plugin());
         uint256 balanceToken1 = token1.balanceOf(pool.plugin());
         console.log("balanceToken0: ", balanceToken0);
         console.log("balanceToken1: ", balanceToken1);
-    }
-
-    function beforeCreatePoolHook(address pool_, address, address, address, address, bytes calldata)
-        external
-        override
-        returns (address)
-    {
-        HyperPlugin _plugin = new HyperPlugin(
-            IAlgebraPool(pool_),
-            ISwapRouter(KITTEN_SWAP_ROUTER),
-            IHyperStrategy(hyperStrategy),
-            address(this)
-        );
-        console.log("plugin deployed at: ", address(_plugin));
-        return address(_plugin);
     }
 
     // Minimal factory surface used by contracts under test

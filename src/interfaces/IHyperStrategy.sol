@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ISwapRouter} from "@cryptoalgebra/integral-periphery/contracts/interfaces/ISwapRouter.sol";
 
-interface IHyperStrategy {
+interface IHyperStrategy is IERC20 {
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                CUSTOM EVENTS                                */
     /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -103,6 +104,12 @@ interface IHyperStrategy {
     /// @param _selector Function selector to whitelist
     /// @param _status True to whitelist, false to remove
     function setSelectorWhitelist(address _marketplace, bytes4 _selector, bool _status) external;
+
+    /// @notice Adds or removes a transfer address from the whitelist
+    /// @param _transferAddress Address to whitelist for transfers
+    /// @param _status True to whitelist, false to remove
+    /// @dev Only callable by owner
+    function setTransferAddressWhitelist(address _transferAddress, bool _status) external;
 
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                            MECHANISM FUNCTIONS                              */

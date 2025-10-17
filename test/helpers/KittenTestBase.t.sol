@@ -29,6 +29,9 @@ abstract contract KittenTestBase is Test {
     INonfungiblePositionManager internal constant KITTEN_NFT_MANAGER =
         INonfungiblePositionManager(0x9ea4459c8DefBF561495d95414b9CF1E2242a3E2);
     address internal constant HYPER_COLLECTION = 0x9125E2d6827a00B0F8330D6ef7BEF07730Bac685;
+    address internal constant DEAD_ADDRESS = address(0xdEaD);
+    address internal constant ZERO_ADDRESS = address(0);
+
 
     bytes32 internal constant DEFAULT_ADMIN_ROLE =
         bytes32(0x0000000000000000000000000000000000000000000000000000000000000000);
@@ -67,19 +70,25 @@ abstract contract KittenTestBase is Test {
         token0.mint(address(this), 1e9 * 1e18);
 
         hyperStrategy =
-            address(new HyperStrategy("Hypurr", "HYPE", address(this), KITTEN_SWAP_ROUTER, HYPER_COLLECTION));
+            payable(address(new HyperStrategy("Hypurr", "HYPE", address(this), KITTEN_SWAP_ROUTER, HYPER_COLLECTION)));
         token1 = MockERC20(address(hyperStrategy));
 
         // Ensure token ordering matches pool expectations
         (token0, token1) = token0 < token1 ? (token0, token1) : (token1, token0);
 
         deployAndInitializePool();
+
+        IHyperStrategy(hyperStrategy).setTransferAddressWhitelist(address(KITTEN_SWAP_ROUTER), true);
+        IHyperStrategy(hyperStrategy).setTransferAddressWhitelist(address(pool.plugin()), true);
+        IHyperStrategy(hyperStrategy).setTransferAddressWhitelist(address(pool), true);
+        IHyperStrategy(hyperStrategy).setTransferAddressWhitelist(address(DEAD_ADDRESS), true);
+        
         mintLiquidity();
     }
 
     function deployAndInitializePool() internal {
         pool = IAlgebraPool(
-            KITTEN_SWAP_FACTORY.createCustomPool(address(this), address(this), address(token0), address(token1), "")
+            KITTEN_SWAP_FACTORY.createPool(address(token0), address(token1), "")
         );
         console.log("pool deployed at: ", address(pool), pool.plugin());
         pool.initialize(79228162514264337593543950336);
@@ -92,7 +101,7 @@ abstract contract KittenTestBase is Test {
         INonfungiblePositionManager.MintParams memory mintParams = INonfungiblePositionManager.MintParams({
             token0: address(token0),
             token1: address(token1),
-            deployer: address(this),
+            deployer: ZERO_ADDRESS,
             tickLower: -887220,
             tickUpper: 887220,
             amount0Desired: 1e22,
@@ -121,7 +130,7 @@ abstract contract KittenTestBase is Test {
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: _tokenIn,
             tokenOut: _tokenOut,
-            deployer: address(this),
+            deployer: ZERO_ADDRESS,
             recipient: address(this),
             deadline: block.timestamp + 15,
             amountIn: amountIn,
@@ -131,23 +140,4 @@ abstract contract KittenTestBase is Test {
 
         amountOut = KITTEN_SWAP_ROUTER.exactInputSingle(params);
     }
-
-    // Hooks expected by Algebra factory custom pool deployer.
-    // Child tests may override these to customize plugin wiring.
-    function beforeCreatePoolHook(
-        address poolAddress,
-        address, /*creator*/
-        address, /*deployer*/
-        address, /*token0*/
-        address, /*token1*/
-        bytes calldata /*data*/
-    ) external virtual returns (address) {
-        HyperPlugin _plugin = new HyperPlugin(
-            IAlgebraPool(poolAddress), ISwapRouter(KITTEN_SWAP_ROUTER), IHyperStrategy(hyperStrategy), feeAddress
-        );
-        console.log("plugin deployed at: ", address(_plugin));
-        return address(_plugin);
-    }
-
-    function afterCreatePoolHook(address, address, address) external view virtual {}
 }
