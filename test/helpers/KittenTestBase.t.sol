@@ -42,7 +42,7 @@ abstract contract KittenTestBase is Test {
     IAlgebraPool internal pool;
     MockERC20 internal token0;
     MockERC20 internal token1;
-    address internal hyperStrategy;
+    address payable internal hyperStrategy;
 
     constructor() {
         // Discover default admin of Algebra factory to grant required roles for custom pool deploys
@@ -66,9 +66,8 @@ abstract contract KittenTestBase is Test {
         // Large test mint for swaps/liquidity
         token0.mint(address(this), 1e9 * 1e18);
 
-        hyperStrategy = address(
-            new HyperStrategy("Hypurr", "HYPE", address(this), KITTEN_SWAP_ROUTER, HYPER_COLLECTION)
-        );
+        hyperStrategy =
+            address(new HyperStrategy("Hypurr", "HYPE", address(this), KITTEN_SWAP_ROUTER, HYPER_COLLECTION));
         token1 = MockERC20(address(hyperStrategy));
 
         // Ensure token ordering matches pool expectations
@@ -144,10 +143,7 @@ abstract contract KittenTestBase is Test {
         bytes calldata /*data*/
     ) external virtual returns (address) {
         HyperPlugin _plugin = new HyperPlugin(
-            IAlgebraPool(poolAddress),
-            ISwapRouter(KITTEN_SWAP_ROUTER),
-            IHyperStrategy(hyperStrategy),
-            feeAddress
+            IAlgebraPool(poolAddress), ISwapRouter(KITTEN_SWAP_ROUTER), IHyperStrategy(hyperStrategy), feeAddress
         );
         console.log("plugin deployed at: ", address(_plugin));
         return address(_plugin);
