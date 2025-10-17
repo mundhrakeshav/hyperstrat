@@ -31,7 +31,7 @@ abstract contract KittenTestBase is Test {
     address internal constant HYPER_COLLECTION = 0x9125E2d6827a00B0F8330D6ef7BEF07730Bac685;
     address internal constant DEAD_ADDRESS = address(0xdEaD);
     address internal constant ZERO_ADDRESS = address(0);
-
+    address internal constant WHYPE = address(0x5555555555555555555555555555555555555555);
 
     bytes32 internal constant DEFAULT_ADMIN_ROLE =
         bytes32(0x0000000000000000000000000000000000000000000000000000000000000000);
@@ -65,10 +65,8 @@ abstract contract KittenTestBase is Test {
 
     /// @notice Deploy tokens and HyperStrategy, then create pool and seed liquidity
     function setUpFixture() internal {
-        token0 = new MockERC20("Token0", "T0");
-        // Large test mint for swaps/liquidity
-        token0.mint(address(this), 1e9 * 1e18);
-
+        token0 = MockERC20(WHYPE);
+        deal(address(token0), address(this), 1e9 * 1e18);
         hyperStrategy =
             payable(address(new HyperStrategy("Hypurr", "HYPE", address(this), KITTEN_SWAP_ROUTER, HYPER_COLLECTION)));
         token1 = MockERC20(address(hyperStrategy));
@@ -87,10 +85,27 @@ abstract contract KittenTestBase is Test {
     }
 
     function deployAndInitializePool() internal {
+        token0.approve(address(KITTEN_SWAP_FACTORY), type(uint256).max);
+        token1.approve(address(KITTEN_SWAP_FACTORY), type(uint256).max);
+
         pool = IAlgebraPool(
             KITTEN_SWAP_FACTORY.createPool(address(token0), address(token1), "")
         );
         console.log("pool deployed at: ", address(pool), pool.plugin());
+
+        // Deploy our custom HyperPlugin and set it as the pool's plugin BEFORE initialize
+        HyperPlugin plugin = new HyperPlugin(
+            pool,
+            KITTEN_SWAP_ROUTER,
+            IHyperStrategy(payable(hyperStrategy)),
+            address(this)
+        );
+
+        // setPlugin is permissioned to POOLS_ADMINISTRATOR_ROLE -> use the granted role holder
+        vm.prank(poolAdmin);
+        pool.setPlugin(address(plugin));
+
+        // Now initialize so plugin hooks run and strategyIsToken0 is set
         pool.initialize(79228162514264337593543950336);
     }
 

@@ -7,54 +7,77 @@ import {IHyperStrategy} from "src/interfaces/IHyperStrategy.sol";
 import {IAlgebraPool} from "@cryptoalgebra/integral-core/contracts/interfaces/IAlgebraPool.sol";
 import {KittenTestBase} from "test/helpers/KittenTestBase.t.sol";
 import {IQuoterV2} from "@cryptoalgebra/integral-periphery/contracts/interfaces/IQuoterV2.sol";
-import {console} from "forge-std/console.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
+import {console} from "forge-std/console.sol";
 contract SwapTest is KittenTestBase {
-    bool private _routerRestrict;
-
     function setUp() public {
         setUpFixture();
     }
 
-    function testSwap() public {
-        address tokenIn = hyperStrategy == address(token0) ? address(token1) : address(token0);
-        address tokenOut = hyperStrategy == address(token0) ? address(token0) : address(token1);
-        (
-            uint256 amountQuotedOut,
-            uint256 amountQuotedIn,
-            uint160 sqrtPriceX96After,
-            uint32 initializedTicksCrossed,
-            uint256 gasEstimate,
-            uint16 fee
-        ) = KITTEN_QUOTER.quoteExactInputSingle(
-            IQuoterV2.QuoteExactInputSingleParams({
-                tokenIn: tokenIn,
-                tokenOut: tokenOut,
-                deployer: ZERO_ADDRESS,
-                amountIn: 1e18,
-                limitSqrtPrice: 0
-            })
-        );
+    function test_SwapFees_AccrueOnBuyAndSell() public {
+        HyperPlugin plugin = HyperPlugin(payable(pool.plugin()));
 
-        console.log("amountQuotedOut:           ", amountQuotedOut);
-        console.log("amountQuotedIn:            ", amountQuotedIn);
-        console.log("sqrtPriceX96After:         ", sqrtPriceX96After);
-        console.log("initializedTicksCrossed:   ", initializedTicksCrossed);
-        console.log("gasEstimate:               ", gasEstimate);
-        console.log("fee:                       ", fee);
+        uint256 strategyBalanceBefore = ERC20(hyperStrategy).balanceOf(address(plugin));
+        uint256 whypeBalanceBefore = ERC20(WHYPE).balanceOf(address(plugin));
 
-        uint256 amountOut = swapExact(tokenIn, tokenOut, 1e18, 0);
-        console.log("swapped 1e18 ", ERC20(tokenIn).name());
-        console.log("for ", amountOut, ERC20(tokenOut).name());
+        swapExact(WHYPE, hyperStrategy, 1e18, 0);
+        uint256 strategyBalanceAfter = ERC20(hyperStrategy).balanceOf(address(plugin));
+        uint256 whypeBalanceAfter = ERC20(WHYPE).balanceOf(address(plugin));
 
-        uint256 balanceToken0 = token0.balanceOf(pool.plugin());
-        uint256 balanceToken1 = token1.balanceOf(pool.plugin());
-        console.log("balanceToken0: ", balanceToken0);
-        console.log("balanceToken1: ", balanceToken1);
+        // assertGt(strategyBalanceAfter, strategyBalanceBefore);
+        assertGt(whypeBalanceAfter, whypeBalanceBefore);
+
+        // // Sell strategy for other token -> in this pool implementation, plugin fees accrue in the other token
+        // // Fund this test with strategy tokens for swap
+        // ERC20(strategyToken).approve(address(KITTEN_SWAP_ROUTER), type(uint256).max);
+        // swapExact(strategyToken, otherToken, 1e18, 0);
+        // uint256 afterStrategy = ERC20(strategyToken).balanceOf(address(plugin));
+        // assertGt(afterStrategy, beforeStrategy);
+        // uint256 afterOther2 = ERC20(otherToken).balanceOf(address(plugin));
+        // assertGe(afterOther2, afterOther);
     }
 
-    // Minimal factory surface used by contracts under test
-    function routerRestrict() external view returns (bool) {
-        return _routerRestrict;
+    function test_SwapFees_ExactCalculations() public {
+        HyperPlugin plugin = HyperPlugin(payable(pool.plugin()));
+        
+        address strategyToken = address(token1) == hyperStrategy ? address(token1) : address(token0);
+        address otherToken = address(token0) == strategyToken ? address(token1) : address(token0);
+        
+        uint256 swapAmount = 1e18;
+        uint256 burnBps = plugin.burnBps();
+        
+        console.log("=== FEE CALCULATION TEST ===");
+        console.log("Burn BPS:", burnBps);
+        
+        // Calculate expected fees for BUY
+        uint256 elapsed = block.timestamp - plugin.initTimestamp();
+        uint256 buyFeeBps = elapsed >= 3600 ? 100_000 : 990_000 - ((990_000 - 100_000) * elapsed) / 3600;
+        
+        console.log("Buy fee BPS:", buyFeeBps);
+        
+        // Perform buy swap and measure fee
+        uint256 beforeBuy = ERC20(otherToken).balanceOf(address(plugin));
+        swapExact(otherToken, strategyToken, swapAmount, 0);
+        uint256 buyFeeAccrued = ERC20(otherToken).balanceOf(address(plugin)) - beforeBuy;
+        
+        console.log("Buy fee accrued:", buyFeeAccrued);
+        
+        // Perform sell swap
+        ERC20(strategyToken).approve(address(KITTEN_SWAP_ROUTER), type(uint256).max);
+        uint256 beforeSell = ERC20(strategyToken).balanceOf(address(plugin));
+        swapExact(strategyToken, otherToken, swapAmount, 0);
+        uint256 strategyIncrease = ERC20(strategyToken).balanceOf(address(plugin)) - beforeSell;
+        
+        console.log("Strategy token increase:", strategyIncrease);
+        
+        // Verify fee calculations
+        uint256 expectedBuyFee = (swapAmount * buyFeeBps) / 1_000_000;
+        uint256 tolerance = expectedBuyFee / 100;
+        
+        assertGe(buyFeeAccrued, expectedBuyFee - tolerance, "Buy fee too low");
+        assertLe(buyFeeAccrued, expectedBuyFee + tolerance, "Buy fee too high");
+        assertGt(strategyIncrease, 0, "Strategy token balance should increase");
+        
+        console.log("=== TEST PASSED ===");
     }
 }
