@@ -32,7 +32,7 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     uint256 public priceMultiplier;
     uint256 public currentFees;
 
-    mapping(address => bool) public whitelistedMarketplaces;
+    mapping(address => bool) public whitelistedTargets;
     mapping(address => mapping(bytes4 => bool)) public whitelistedSelectors;
     mapping(address => bool) public whitelistedTransferAddresses;
 
@@ -48,6 +48,7 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     event PriceMultiplierUpdated(uint256 newPriceMultiplier);
     event SelectorWhitelisted(address indexed marketplace, bytes4 indexed selector, bool status);
     event TransferAddressWhitelisted(address indexed transferAddress, bool status);
+    event TargetWhitelisted(address indexed target, bool status);
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                                CUSTOM ERRORS                                */
     /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -138,17 +139,11 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     /// @param _marketplace Address of the marketplace contract
     /// @param _status True to whitelist, false to remove
     /// @dev Only callable by owner
-    function setMarketplaceWhitelist(address _marketplace, bool _status) external onlyOwner {
-        if (_marketplace == address(0)) revert InvalidAddress();
-        whitelistedMarketplaces[_marketplace] = _status;
-        emit MarketplaceWhitelisted(_marketplace, _status);
+    function setTargetWhitelist(address _target, bool _status) external onlyOwner {
+        if (_target == address(0)) revert InvalidAddress();
+        whitelistedTargets[_target] = _status;
+        emit TargetWhitelisted(_target, _status);
     }
-
-    // @audit Maybe have a func to remove sometyhing from the whitelist
-
-    /* ═══════════════════════════════════════════════════════════════════════════ */
-    /*                            MECHANISM FUNCTIONS                              */
-    /* ═══════════════════════════════════════════════════════════════════════════ */
 
     function setSelectorWhitelist(address _marketplace, bytes4 _selector, bool _status) external onlyOwner {
         if (_marketplace == address(0) || _selector == bytes4(0)) revert InvalidAddress();
@@ -166,172 +161,41 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
         emit TransferAddressWhitelisted(_transferAddress, _status);
     }
 
-    /* TODO:
-        - Needs approval flow
-        - Needs to be able to sell NFTs
-    */
-    /// @notice Buys a specific NFT from an external marketplace and lists it for sale
-    /// @param marketplace marketplace contract address
-    /// @param value Amount of HYPE (native) to send with the purchase call
-    /// @param data Calldata to execute the purchase on the marketplace
-    /// @param expectedId Token ID expected to be purchased
-    /// @dev Anyone may call this function. The contract will only execute calls to
-    ///      marketplaces and function selectors that are present in the contract-controlled
-    ///      whitelists (see `whitelistedMarketplaces` and `whitelistedSelectors`). These
-    ///      whitelists are controlled by the factory/owner. The function uses the
-    ///      contract's native balance minus `currentFees` to pay for purchases.
+    /* ═══════════════════════════════════════════════════════════════════════════ */
+    /*                            MECHANISM FUNCTIONS                              */
+    /* ═══════════════════════════════════════════════════════════════════════════ */
 
-    function buyNFT(address marketplace, uint256 value, bytes calldata data, uint256 expectedId)
+    function executeExternalCall(address[] calldata targets, bytes[] calldata data, uint256[] calldata values)
         external
         nonReentrant
     {
-        // Verify marketplace is whitelisted
-        if (!whitelistedMarketplaces[marketplace]) {
-            revert MarketplaceNotWhitelisted();
+        // Ensure arrays have the same length
+        if (targets.length != data.length || targets.length != values.length) {
+            revert InvalidAddress();
         }
 
-        // Ensure calldata has at least 4 bytes before taking the selector slice
-        if (data.length < 4 || !whitelistedSelectors[marketplace][bytes4(data[:4])]) {
-            revert NotWhitelistedSelector();
-        }
+        // Loop through all targets and execute calls
+        for (uint256 i = 0; i < targets.length; i++) {
+            address target = targets[i];
+            bytes calldata callData = data[i];
+            uint256 value = values[i];
 
-        // Check ownership, but don't revert if token doesn't exist (ownerOf may revert)
-        try collection.ownerOf(expectedId) returns (address owner) {
-            if (owner == address(this)) {
-                revert AlreadyNFTOwner();
+            // Verify target is whitelisted
+            if (!whitelistedTargets[target]) {
+                revert MarketplaceNotWhitelisted();
             }
-        } catch {
-            // If ownerOf reverts (non-existent token), proceed — caller expects to buy it
+
+            // Ensure calldata has at least 4 bytes before taking the selector slice
+            if (callData.length < 4 || !whitelistedSelectors[target][bytes4(callData[:4])]) {
+                revert NotWhitelistedSelector();
+            }
+
+            // Execute the external call
+            (bool success, bytes memory returnData) = target.call{value: value}(callData);
+            if (!success) {
+                revert ExternalCallFailed(returnData);
+            }
         }
-
-        uint256 totalBalanceBefore = address(this).balance;
-        uint256 nftBalanceBefore = collection.balanceOf(address(this));
-
-        // Ensure reserved fees aren't larger than the available balance
-        if (totalBalanceBefore < currentFees) {
-            revert NotEnoughValue();
-        }
-
-        uint256 balanceToSpend = totalBalanceBefore - currentFees;
-
-        if (value > balanceToSpend) {
-            revert NotEnoughValue();
-        }
-
-        (bool success, bytes memory returnData) = marketplace.call{value: value}(data);
-        if (!success) {
-            revert ExternalCallFailed(returnData);
-        }
-
-        uint256 nftBalanceAfter = collection.balanceOf(address(this));
-        if (nftBalanceAfter != nftBalanceBefore + 1) {
-            revert NeedToBuyNFT();
-        }
-
-        if (collection.ownerOf(expectedId) != address(this)) {
-            revert NotNFTOwner();
-        }
-
-        // Compute cost safely: if the contract balance increased (e.g. refunds/bonuses),
-        // avoid underflow by setting cost to 0 in that case.
-        uint256 totalBalanceAfter = address(this).balance;
-        uint256 cost;
-        if (totalBalanceAfter <= totalBalanceBefore) {
-            uint256 diff = totalBalanceBefore - totalBalanceAfter;
-            // Clamp cost to at most the `value` sent for the purchase call
-            cost = diff > value ? value : diff;
-        } else {
-            // Received more ETH than before the call; treat purchase cost as 0
-            cost = 0;
-        }
-
-        // List NFT for sale at markup
-        uint256 salePrice = (cost * priceMultiplier) / E6;
-
-        // List NFT for sale at markup
-        // nftForSale[expectedId] = salePrice;
-        emit NFTBoughtByProtocol(expectedId, cost, salePrice);
-    }
-
-    // /// @notice Sells an NFT owned by the contract for the listed price
-    // /// @param tokenId The ID of the NFT to sell
-    // function sellTargetNFT(uint256 tokenId) external payable nonReentrant {
-    //     // Get sale price
-    //     uint256 salePrice = nftForSale[tokenId];
-
-    //     // Verify NFT is for sale
-    //     if (salePrice == 0) revert NFTNotForSale();
-
-    //     // Verify sent HYPE matches sale price
-    //     if (msg.value != salePrice) revert NFTPriceTooLow();
-
-    //     // Verify contract owns the NFT
-    //     if (collection.ownerOf(tokenId) != address(this)) revert NotNFTOwner();
-
-    //     // Transfer NFT to buyer
-    //     collection.transferFrom(address(this), msg.sender, tokenId);
-
-    //     // Remove NFT from sale
-    //     delete nftForSale[tokenId];
-
-    //     // Add sale proceeds to TWAP queue
-    //     hypeToTwap += salePrice;
-
-    //     emit NFTSoldByProtocol(tokenId, salePrice, msg.sender);
-    // }
-
-    // /// @notice Processes accumulated HYPE to buy and burn tokens
-    // /// @dev Can be called by anyone once delay period has passed
-    // /// @dev Caller receives 0.5% reward for executing the transaction
-    // function buyAndBurnTokens() external nonReentrant {
-    //     if (hypeToTwap == 0) revert NoHYPEToTwap();
-
-    //     // Check if enough blocks have passed since last TWAP
-    //     if (block.number < lastTwapBlock + twapDelayInBlocks) revert TwapDelayNotMet();
-
-    //     // Calculate amount to burn - either twapIncrement or remaining hypeToTwap
-    //     uint256 burnAmount = twapIncrement;
-    //     if (hypeToTwap < twapIncrement) {
-    //         burnAmount = hypeToTwap;
-    //     }
-
-    //     // Calculate 0.5% reward for caller
-    //     uint256 reward = (burnAmount * 5) / 1000;
-    //     burnAmount -= reward;
-
-    //     // Update state
-    //     hypeToTwap -= (burnAmount + reward);
-    //     lastTwapBlock = block.number;
-
-    //     // Execute buy and burn
-    //     _buyAndBurnTokens(burnAmount);
-
-    //     // Send reward to caller
-    //     SafeTransferLib.forceSafeTransferETH(msg.sender, reward);
-    // }
-
-    /* ═══════════════════════════════════════════════════════════════════════════ */
-    /*                             INTERNAL FUNCTIONS                              */
-    /* ═══════════════════════════════════════════════════════════════════════════ */
-
-    /// @notice Buys tokens with native $HYPE via GLiquid and burns them
-    /// @param amountIn The amount of $HYPE to spend on tokens
-    function _buyAndBurnTokens(uint256 amountIn) internal {
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
-            tokenIn: WHYPE,
-            deployer: address(0),
-            tokenOut: address(this),
-            recipient: DEAD_ADDRESS,
-            deadline: block.timestamp,
-            amountIn: amountIn,
-            amountOutMinimum: 0,
-            limitSqrtPrice: 0
-        });
-
-        // Execute swap with native token - tokens go directly to DEAD_ADDRESS
-        uint256 amountOut = swapRouter.exactInputSingle{value: amountIn}(params);
-
-        emit TokensBurned(amountIn, amountOut);
     }
 
     // @audit review this: is this
