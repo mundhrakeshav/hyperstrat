@@ -136,7 +136,7 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     }
 
     /// @notice Adds or removes a marketplace from the whitelist
-    /// @param _marketplace Address of the marketplace contract
+    /// @param _target Address of the target contract
     /// @param _status True to whitelist, false to remove
     /// @dev Only callable by owner
     function setTargetWhitelist(address _target, bool _status) external onlyOwner {
