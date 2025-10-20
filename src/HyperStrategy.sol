@@ -30,7 +30,6 @@ contract HyperStrategy is ERC20, ReentrancyGuard, Ownable {
     string private tokenName;
     string private tokenSymbol;
     uint256 public priceMultiplier;
-    uint256 public currentFees;
 
     mapping(address => bool) public whitelistedTargets;
     mapping(address => mapping(bytes4 => bool)) public whitelistedSelectors;

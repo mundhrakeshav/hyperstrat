@@ -71,9 +71,6 @@ interface IHyperStrategy is IERC20 {
     /// @notice Returns the current price multiplier for relisting NFTs
     function priceMultiplier() external view returns (uint256);
 
-    /// @notice Returns the current accumulated fees
-    function currentFees() external view returns (uint256);
-
     /// @notice Checks if a marketplace is whitelisted
     /// @param marketplace Address to check
     function whitelistedMarketplaces(address marketplace) external view returns (bool);
@@ -95,9 +92,9 @@ interface IHyperStrategy is IERC20 {
     function setPriceMultiplier(uint256 _newMultiplier) external;
 
     /// @notice Adds or removes a marketplace from the whitelist
-    /// @param _marketplace Address of the marketplace contract
+    /// @param _target Address of the target contract
     /// @param _status True to whitelist, false to remove
-    function setMarketplaceWhitelist(address _marketplace, bool _status) external;
+    function setTargetWhitelist(address _target, bool _status) external;
 
     /// @notice Adds or removes a function selector from the whitelist for a marketplace
     /// @param _marketplace Address of the marketplace contract
@@ -114,12 +111,6 @@ interface IHyperStrategy is IERC20 {
     /* ═══════════════════════════════════════════════════════════════════════════ */
     /*                            MECHANISM FUNCTIONS                              */
     /* ═══════════════════════════════════════════════════════════════════════════ */
-    /// @notice Buys a specific NFT from an external marketplace
-    /// @param marketplace Marketplace contract address
-    /// @param value Amount of HYPE (native) to send with the purchase call
-    /// @param data Calldata to execute the purchase on the marketplace
-    /// @param expectedId Token ID expected to be purchased
-    function buyNFT(address marketplace, uint256 value, bytes calldata data, uint256 expectedId) external;
 
     /// @notice ERC721 receiver function to accept NFT transfers
     function onERC721Received(address operator, address from, uint256 tokenId, bytes calldata data)
